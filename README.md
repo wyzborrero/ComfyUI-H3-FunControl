@@ -263,6 +263,29 @@ Once the original block has run, `args["img"]` *is* the output and the tower's
 entry state is gone. The seed must be cloned before the base block runs, at the
 entry layer only.
 
+### Trap 8: sparse-attention backends silently capture the control tower
+
+Sparse-attention packs install an `optimized_attention_override` into
+`transformer_options`, alongside routing state that describes the **base** packed
+stream: the running block index, the video span, a compose table. comfy's
+`Attention` passes `transformer_options` straight through to
+`optimized_attention`, so if you hand the control tower the sampler's dict, its
+blocks go sparse too, routed with another tensor's bookkeeping.
+
+Measured with [Sol-Attn](https://github.com/kijai/ComfyUI-SolAttn_triton) on the
+test shot: **1.39x faster and the control was gone entirely.** Not degraded,
+gone. The figure stood centred and near-motionless for the whole clip while the
+same seed without Sol-Attn followed the blocking exactly. Nothing errored.
+
+This node now strips those keys before calling its own blocks (`_dense_options`
+in `nodes.py`), so the tower stays dense whatever the sampler is using. The
+tower is 5 blocks against the base model's 50, so running it dense costs little
+and keeps the control exact.
+
+If you write another ControlNet for H3, this is the trap that will get you: your
+blocks are not the model's blocks, but they receive the model's
+`transformer_options`.
+
 ---
 
 ## Practical findings
@@ -356,9 +379,9 @@ Untested or unknown:
 - The ControlNet was trained against the **fl2va** base, and we mostly run it on
   **ref2va**. Same architecture, loads and runs, adherence appears to hold, but
   it is not the trained pairing.
-- Interaction with sparse-attention backends. Sol-Attn sparsifies through
-  `transformer_options`, which the control tower inherits, so the control blocks
-  get sparsified too. Untested territory.
+- Sparse attention on the BASE model. The control tower is kept dense (Trap 8),
+  but we have not yet checked how much sparsifying the base costs in adherence,
+  only that the tower must be excluded. Sol-Attn measured 1.39x on our shot.
 - Only depth and pose have been exercised. Canny, HED and MLSD are in the union
   model's training set but we have not run them.
 

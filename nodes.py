@@ -231,7 +231,7 @@ class H3FunControlApply:
                     control = cb.block(control, args["t_emb"],
                                        args["mod_segments"],
                                        args["rope_freqs"],
-                                       transformer_options=options)
+                                       transformer_options=_dense_options(options))
                 except RuntimeError as exc:
                     # A bare "mat1 and mat2 must have the same dtype"
                     # names no tensor. Say which one.
@@ -272,6 +272,31 @@ class H3FunControlApply:
             patched.set_model_patch_replace(make_hook(layer, inner), "dit",
                                             "double_block", layer)
         return (patched,)
+
+
+# Attention backends that a sampler installs for the BASE stream, which the
+# control tower must not inherit.
+#
+# Sparse-attention packs (Sol-Attn, and anything built the same way) publish an
+# `optimized_attention_override` into transformer_options, plus routing state
+# describing the base packed stream: the running block index, the video span,
+# a compose table. comfy's Attention passes transformer_options straight through
+# to optimized_attention, so handing the control tower the sampler's dict makes
+# its blocks sparse as well -- and routed with another tensor's bookkeeping.
+#
+# Measured with Sol-Attn: the clip came back with the figure static and centred,
+# no control at all, 1.39x faster. Not a subtle degradation, a total loss. The
+# tower is 5 blocks against the base model's 50, so running it dense costs
+# little and keeps the control exact.
+_BACKEND_KEYS = ("optimized_attention_override", "sol_compose", "sol_block",
+                 "sol_h3_video_span")
+
+
+def _dense_options(options):
+    """transformer_options with any attention-backend override stripped."""
+    if not options or not any(k in options for k in _BACKEND_KEYS):
+        return options
+    return {k: v for k, v in options.items() if k not in _BACKEND_KEYS}
 
 
 def _video_span(mod_segments):
