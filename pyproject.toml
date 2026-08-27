@@ -3,23 +3,41 @@
 # URL. Registry ids are lowercase.
 name = "comfyui-h3-funcontrol"
 description = "ControlNet for MiniMax-H3. Drive an H3 generation with a depth, canny, pose, HED or MLSD control video, built on ComfyUI's own H3 blocks."
-version = "0.1.0"
+version = "0.1.1"
 license = { file = "LICENSE" }
 authors = [{ name = "Wyz Borrero" }]
 requires-python = ">=3.10"
 # Nothing beyond ComfyUI itself. The node is built out of comfy.ldm.minimax.
 dependencies = []
 
+# The registry reads these to say what the node runs on.
+#
+# CUDA only, deliberately. There is nothing CUDA-specific in this file, but H3's
+# attention takes a fused in-place RoPE kernel and the checkpoints are bf16, and
+# the only hardware this has actually been run on is an RTX 5090. Claiming ROCm
+# or Metal would be claiming something untested. If you get it working on other
+# accelerators, open an issue and it goes in.
+classifiers = [
+    "Operating System :: OS Independent",
+    "Environment :: GPU :: NVIDIA CUDA",
+]
+
 [project.urls]
 Repository = "https://github.com/wyzborrero/ComfyUI-H3-FunControl"
+"Bug Tracker" = "https://github.com/wyzborrero/ComfyUI-H3-FunControl/issues"
 
 [tool.comfy]
-# PublisherId is the handle after the @ on your registry profile page. It is
-# globally unique and CANNOT be changed later, because it forms part of the
-# node's URL. Register at https://registry.comfy.org and create it there first.
+# Globally unique and permanent: it forms part of the node's URL.
 PublisherId = "wyzborrero"
-# DisplayName is user-facing and can be changed later.
+# User-facing, and changeable later.
 DisplayName = "H3 Fun ControlNet"
-# Optional: a URL to an icon, max 800x400, svg/png/jpg/gif.
+# Developed and tested against ComfyUI 0.34.0, which is where comfy/ldm/minimax
+# provides the DiTBlock and AdalnProj this node is built out of, and where
+# transformer_options["patches_replace"]["dit"] is the injection point. Earlier
+# versions are untested rather than known-bad.
+requires-comfyui = ">=0.34.0"
+# Icon and Banner take URLs. Left empty until there is somewhere public to serve
+# them from: Icon is a square image up to 400px, Banner is 21:9.
 Icon = ""
+Banner = ""
 includes = []
