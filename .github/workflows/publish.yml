@@ -1,0 +1,35 @@
+# Publish to the Comfy registry when the version in pyproject.toml changes.
+#
+# Setup, once:
+#   1. On GitHub: Settings -> Secrets and variables -> Actions -> New repository
+#      secret. Name it REGISTRY_ACCESS_TOKEN and paste the registry API key.
+#      Pasting into a browser works, which is the point of doing it this way
+#      rather than fighting a terminal.
+#   2. Make sure [tool.comfy] PublisherId in pyproject.toml is filled in.
+#
+# After that, publishing is: bump `version` in pyproject.toml, commit, push.
+# Nothing else. The key never touches a shell, a file on disk, or a terminal
+# history.
+#
+# workflow_dispatch is here so a publish can also be triggered by hand from the
+# Actions tab without changing the version, which is useful the first time.
+
+name: Publish to Comfy registry
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - master
+    paths:
+      - "pyproject.toml"
+
+jobs:
+  publish-node:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: Comfy-Org/publish-node-action@main
+        with:
+          personal_access_token: ${{ secrets.REGISTRY_ACCESS_TOKEN }}
