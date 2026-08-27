@@ -17,7 +17,7 @@ Repository = "https://github.com/wyzborrero/ComfyUI-H3-FunControl"
 # PublisherId is the handle after the @ on your registry profile page. It is
 # globally unique and CANNOT be changed later, because it forms part of the
 # node's URL. Register at https://registry.comfy.org and create it there first.
-PublisherId = ""
+PublisherId = "wyzborrero"
 # DisplayName is user-facing and can be changed later.
 DisplayName = "H3 Fun ControlNet"
 # Optional: a URL to an icon, max 800x400, svg/png/jpg/gif.

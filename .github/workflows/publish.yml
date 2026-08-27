@@ -13,6 +13,11 @@
 #
 # workflow_dispatch is here so a publish can also be triggered by hand from the
 # Actions tab without changing the version, which is useful the first time.
+#
+# NOTE FOR A PUBLIC REPO: never add pull_request_target to a workflow that can
+# see secrets, and never let one run code from a fork. Those are the two ways a
+# public repo leaks a token. As written, only someone with write access can
+# trigger this, and fork pull requests get no secrets.
 
 name: Publish to Comfy registry
 
@@ -29,7 +34,10 @@ jobs:
   publish-node:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: Comfy-Org/publish-node-action@main
+      # Pinned to a SHA rather than a tag or branch. A public repo runs these
+      # with the registry key available, so the code that runs should be the
+      # code that was reviewed, not whatever the upstream branch holds today.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+      - uses: Comfy-Org/publish-node-action@d2366e7abb6ab16f3bb03e3520ae25c8cf749bc9  # main, 2026-08-27
         with:
           personal_access_token: ${{ secrets.REGISTRY_ACCESS_TOKEN }}
