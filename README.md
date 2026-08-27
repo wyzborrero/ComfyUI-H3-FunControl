@@ -375,3 +375,9 @@ working another way, or who can improve on the pose-versus-depth finding.
   longer.
 - The ComfyUI team for `patches_replace`, a genuinely well-designed extension
   point.
+
+---
+
+## Licence
+
+Apache License 2.0. See [LICENSE](LICENSE).
