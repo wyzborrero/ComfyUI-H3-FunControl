@@ -17,7 +17,8 @@ video rather than an error, so they are worth writing down.
 
 ## What it is
 
-A ControlNet for MiniMax-H3, so you can drive an H3 generation with a control
+A ControlNet for [MiniMax-H3](https://github.com/MiniMax-AI/MiniMax-H3), so you
+can drive an H3 generation with a control
 video instead of only a prompt and a first frame. Feed it depth, canny, pose,
 HED or MLSD and the output follows that structure frame by frame, without
 re-timing or re-composing the action.
@@ -31,13 +32,15 @@ does not care how you made it.
 
 The weights were already out there and nothing could load them.
 
-`alibaba-pai` released **MiniMax-H3-Fun-Controlnet-Union** with the VideoX-Fun
-pipeline, but that release is full-width AdaLN, while the pruned H3 checkpoints
+[Alibaba PAI](https://huggingface.co/alibaba-pai) released
+**[MiniMax-H3-Fun-Controlnet-Union](https://huggingface.co/alibaba-pai/MiniMax-H3-Fun-Controlnet-Union)**
+with the [VideoX-Fun](https://github.com/aigc-apps/VideoX-Fun) pipeline, but that release is full-width AdaLN, while the pruned H3 checkpoints
 almost everyone actually runs are curve-form. The two do not line up. Using the
 official ControlNet meant the 34 GB non-pruned base, and adherence still would
 not come right.
 
-**Kijai then re-derived the ControlNet in the curve-form basis**, using
+**[Kijai](https://github.com/kijai) then re-derived the ControlNet in the
+curve-form basis**, using
 ComfyUI's own module naming. That is the piece that made a small implementation
 possible: with those weights, a control block *is* comfy's `DiTBlock`, and the
 AdaLN is comfy's `AdalnProj` unmodified.
@@ -76,7 +79,7 @@ everyone actually runs:
 | | `adaln_proj.linear` | works here |
 |---|---|---|
 | `MiniMax-H3-Fun-Controlnet-Union.safetensors` (original) | `[96768, 2688]` | no |
-| `minimax_h3_fun_controlnet_union_pruned_bf16.safetensors` (Kijai) | `[96768, 8]` | yes |
+| `minimax_h3_fun_controlnet_union_pruned_bf16.safetensors` ([Kijai](https://huggingface.co/Kijai/MiniMax-H3-experimental)) | `[96768, 8]` | yes |
 
 The original release is full-width AdaLN; the pruned H3 checkpoints are
 curve-form. Kijai re-derived the ControlNet in the curve-form basis (metadata
@@ -440,16 +443,48 @@ working another way, or who can improve on the pose-versus-depth finding.
 
 ---
 
-## Credits
+## Thanks
 
-- **MiniMax** for H3, **alibaba-pai / VideoX-Fun** for the Fun-ControlNet.
-- **[Kijai](https://github.com/kijai)** for the curve-form re-derivation, without
-  which this node would need the 34 GB non-pruned base and would be a great deal
-  longer.
-- The ComfyUI team for `patches_replace`, a genuinely well-designed extension
-  point.
+This node is a small piece of glue on top of a lot of other people's work. In
+order of how much of it they did:
 
----
+**[MiniMax](https://www.minimax.io/blog/minimax-h3)** for building and openly
+releasing **[MiniMax-H3](https://github.com/MiniMax-AI/MiniMax-H3)**, an
+omni-modal generator that does video with native stereo audio at up to 2K. None
+of this exists without that release, and releasing it open was a choice they did
+not have to make.
+
+**[Alibaba PAI](https://huggingface.co/alibaba-pai)** for the Fun-ControlNet
+itself: **[MiniMax-H3-Fun-Controlnet-Union](https://huggingface.co/alibaba-pai/MiniMax-H3-Fun-Controlnet-Union)**,
+a single unified adapter covering canny, depth, HED, MLSD and pose, plus video
+inpainting. The architecture this node loads is theirs, and
+**[VideoX-Fun](https://github.com/aigc-apps/VideoX-Fun)** is where we read the
+packing order and the pipeline that told us what the 196 columns are. They also
+publish the [Acc-LoRAs](https://huggingface.co/alibaba-pai/MiniMax-H3-Acc-LoRAs).
+
+**[Kijai](https://github.com/kijai)** twice over. First for
+**[MiniMax-H3-experimental](https://huggingface.co/Kijai/MiniMax-H3-experimental)**,
+the pruned and quantised H3 checkpoints most people actually run, where the
+modulation weights (roughly 40% of the parameters) are replaced by a lookup
+table built from a curve fitted to them. Then for re-deriving the Fun-ControlNet
+into that same curve-form basis, using ComfyUI's own module naming. That second
+piece is the reason this node is a few hundred lines instead of a few thousand:
+with those weights a control block simply *is* comfy's `DiTBlock`. Also for
+**[ComfyUI-SolAttn_triton](https://github.com/kijai/ComfyUI-SolAttn_triton)**,
+which we tested against and which produced Trap 8.
+
+**The [ComfyUI](https://github.com/comfyanonymous/ComfyUI) team** for
+`comfy/ldm/minimax/`, which is clear enough to read as a specification, and for
+`transformer_options["patches_replace"]`, a genuinely well-designed extension
+point that let this be written without monkey-patching a single thing.
+
+**[NVlabs](https://github.com/NVlabs/Sana/tree/sol-engine/techniques/sparse_backends/sol_attn)**
+for Sol-Attn itself ([paper](https://arxiv.org/abs/2607.24027)).
+
+**[wildminder](https://github.com/wildminder/awesome-minimax-H3)** for
+awesome-minimax-H3, which is how we established that nobody had done this yet.
+
+If we have misattributed anything, open an issue and we will fix it.
 
 ## Licence
 
