@@ -15,15 +15,42 @@ video rather than an error, so they are worth writing down.
 
 ---
 
-## What it's for
+## What it is
 
-Unreal Engine blocking to AI video, frame-locked. You render a control pass
-(depth, pose) from your 3D blocking, and H3 renders your look on top of it
-without re-timing or re-framing the action. It is WYSIWYG: what you block is
-what you get.
+A ControlNet for MiniMax-H3, so you can drive an H3 generation with a control
+video instead of only a prompt and a first frame. Feed it depth, canny, pose,
+HED or MLSD and the output follows that structure frame by frame, without
+re-timing or re-composing the action.
 
-That is the trade against a model like Seedance, which produces a better picture
-but reframes and re-times freely. Frame-lock is the whole point here.
+Where the control video comes from is entirely up to you. A depth or pose pass
+out of a 3D package, an estimator run over reference footage, something drawn by
+hand, or preprocessors inside ComfyUI itself. The node takes an IMAGE batch and
+does not care how you made it.
+
+## Why it exists
+
+The weights were already out there and nothing could load them.
+
+`alibaba-pai` released **MiniMax-H3-Fun-Controlnet-Union** with the VideoX-Fun
+pipeline, but that release is full-width AdaLN, while the pruned H3 checkpoints
+almost everyone actually runs are curve-form. The two do not line up. Using the
+official ControlNet meant the 34 GB non-pruned base, and adherence still would
+not come right.
+
+**Kijai then re-derived the ControlNet in the curve-form basis**, using
+ComfyUI's own module naming. That is the piece that made a small implementation
+possible: with those weights, a control block *is* comfy's `DiTBlock`, and the
+AdaLN is comfy's `AdalnProj` unmodified.
+
+What was still missing was anything that consumed them. We checked ComfyUI core,
+KJNodes, Kijai's own README, and
+[awesome-minimax-H3](https://github.com/wildminder/awesome-minimax-H3): no
+ControlNet node for H3 anywhere. As far as we can tell this is the first one.
+
+So this is a small piece of glue over other people's work, filling a hole rather
+than inventing anything. The interesting part is not the code, which is short,
+but the list of ways it can be wrong while still producing a perfectly plausible
+video. That is what most of this README is.
 
 ---
 
@@ -273,9 +300,9 @@ test shot, same seed and settings throughout:
 
 | run | time | control |
 |---|---|---|
-| no Sol-Attn (baseline) | 332s | follows the blocking |
+| no Sol-Attn (baseline) | 332s | follows the control |
 | Sol-Attn, `morton: true` | 240s | **gone.** Figure static and centred for the whole clip |
-| Sol-Attn, `morton: false` | **220s (1.51x)** | follows the blocking |
+| Sol-Attn, `morton: false` | **220s (1.51x)** | follows the control |
 
 Nothing errored in the broken case. The clip looked like a normal generation
 that had simply ignored its control input.
@@ -307,9 +334,11 @@ reorders tokens invalidates the row offsets your skip depends on.**
 
 ## Practical findings
 
-These are measurements on one shot (90 frames, 1280x704, a figure crossing a
-wide locked-off frame), not universal laws. Your mileage will vary with how big
-the subject is in frame, which turns out to matter a lot.
+These are measurements on one shot: 90 frames at 1280x704, a single figure
+walking, jumping and running across a locked-off frame, controlled from a depth
+pass and a DWPose pass of the same action. They are not universal laws. How big
+the subject is in frame turns out to matter a lot, so expect different results
+at a different scale.
 
 ### Pose holds the figure; depth does not
 
@@ -318,8 +347,8 @@ whole silhouette, so depth "should" survive downsampling better.
 
 It doesn't. With **depth alone**, the figure drifted in *distance from camera*,
 walking diagonally toward the lens instead of laterally, and grew steadily
-across the shot. With **pose**, her size stayed constant and matched the
-blocking.
+across the shot. With **pose**, the figure's size stayed constant and matched
+the control.
 
 The likely reason is token resolution. H3's video VAE downsamples 16x, then
 patches 2x2, so 1280x704 is a token grid of **40 by 22 per latent frame**. A
@@ -328,8 +357,9 @@ ramp across three tokens is nearly flat and says almost nothing, while a
 skeleton's joint positions stay unambiguous even when coarse.
 
 Practical consequence: **the subject's size in frame is the binding constraint
-on control authority.** If you need tight control, block the shot closer. That
-is a camera decision, not a node setting.
+on control authority.** If you need tight control over a figure, frame it larger
+or generate at a higher resolution. That is a decision about the shot, not a
+node setting.
 
 ### Strength above 1.0 is not the answer
 
@@ -341,11 +371,12 @@ saturation signature as Trap 3 and Trap 4. Don't reach for it.
 `end_percent` defaults to 1.0, which means control asserts itself through every
 step including the last, where texture forms.
 
-If your control pass has featureless regions (ours had a bare Unreal ground
-plane, so the depth pass's ground is a smooth gradient) the ControlNet keeps
-insisting that surface is smooth, and suppresses any texture the prompt asks
-for. Ending control around `0.6` pins structure while the noise is coarse, and
-lets the late steps put in detail the control cannot describe.
+If your control pass has featureless regions the ControlNet keeps insisting
+those surfaces are smooth, and suppresses any texture the prompt asks for. Our
+test case was a depth pass of a figure on an empty ground plane: the ground is a
+smooth gradient carrying no detail, so a prompt asking for drawn texture there
+lost every time. Ending control around `0.6` pins structure while the noise is
+coarse, and lets the late steps put in detail the control cannot describe.
 
 ### CFG
 
@@ -372,8 +403,9 @@ UNETLoader --> H3FunControlApply --> MiniMaxH3SigmaShift --> Guider --> Sampler
 
 This matters. `MiniMaxH3ImageToVideo` only accepts `first_frame` /`last_frame`,
 which means a character can only reach the model baked into a styled first
-frame. If your first frame is derived from a featureless 3D blocking render, the
-character comes out featureless too, and no prompt wording fixes it.
+frame. If that frame comes from an untextured source, an ordinary 3D render
+without materials for instance, the character comes out untextured too, and no
+prompt wording fixes it.
 
 Swapping in **`MiniMaxH3ReferenceToVideo`** puts a character sheet in as
 `ref_image_0`, present on every frame, while the ControlNet still drives the
@@ -398,7 +430,7 @@ Untested or unknown:
   it is not the trained pairing.
 - How much sparsifying the base model costs in adherence. Sol-Attn with
   `morton: false` measured 1.51x on our shot with the control still following
-  the blocking, but we have not graded the picture against the dense baseline
+  the control, but we have not graded the picture against the dense baseline
   beyond confirming the control survives.
 - Only depth and pose have been exercised. Canny, HED and MLSD are in the union
   model's training set but we have not run them.

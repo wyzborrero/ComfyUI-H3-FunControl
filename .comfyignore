@@ -1,0 +1,4 @@
+# Excluded from the published registry package, .gitignore syntax.
+# Git-untracked files are already excluded; this is for tracked files that
+# belong in the repo but not in the package people install.
+example_workflows/

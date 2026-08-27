@@ -1,16 +1,25 @@
 [project]
+# `name` is IMMUTABLE once published to the registry and appears in the node's
+# URL. Registry ids are lowercase.
 name = "comfyui-h3-funcontrol"
-description = "MiniMax-H3 Fun ControlNet for ComfyUI. Depth, canny, pose, HED or MLSD video driving H3 frame by frame, built on ComfyUI's own H3 blocks."
+description = "ControlNet for MiniMax-H3. Drive an H3 generation with a depth, canny, pose, HED or MLSD control video, built on ComfyUI's own H3 blocks."
 version = "0.1.0"
 license = { file = "LICENSE" }
 authors = [{ name = "Wyz Borrero" }]
 requires-python = ">=3.10"
+# Nothing beyond ComfyUI itself. The node is built out of comfy.ldm.minimax.
 dependencies = []
 
 [project.urls]
-Repository = ""
+Repository = "https://github.com/wyzborrero/ComfyUI-H3-FunControl"
 
 [tool.comfy]
-DisplayName = "H3 Fun ControlNet"
+# PublisherId is the handle after the @ on your registry profile page. It is
+# globally unique and CANNOT be changed later, because it forms part of the
+# node's URL. Register at https://registry.comfy.org and create it there first.
 PublisherId = ""
+# DisplayName is user-facing and can be changed later.
+DisplayName = "H3 Fun ControlNet"
+# Optional: a URL to an icon, max 800x400, svg/png/jpg/gif.
+Icon = ""
 includes = []
