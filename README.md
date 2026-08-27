@@ -263,28 +263,35 @@ Once the original block has run, `args["img"]` *is* the output and the tower's
 entry state is gone. The seed must be cloned before the base block runs, at the
 entry layer only.
 
-### Trap 8: sparse-attention backends silently capture the control tower
+### Trap 8: sparse attention breaks the control, cause not yet pinned down
 
-Sparse-attention packs install an `optimized_attention_override` into
-`transformer_options`, alongside routing state that describes the **base** packed
-stream: the running block index, the video span, a compose table. comfy's
-`Attention` passes `transformer_options` straight through to
-`optimized_attention`, so if you hand the control tower the sampler's dict, its
-blocks go sparse too, routed with another tensor's bookkeeping.
+**Status: open. Do not assume this node works under a sparse-attention
+backend.**
 
-Measured with [Sol-Attn](https://github.com/kijai/ComfyUI-SolAttn_triton) on the
-test shot: **1.39x faster and the control was gone entirely.** Not degraded,
+Measured with [Sol-Attn](https://github.com/kijai/ComfyUI-SolAttn_triton) on our
+test shot: **1.39x faster, and the control was gone entirely.** Not degraded,
 gone. The figure stood centred and near-motionless for the whole clip while the
 same seed without Sol-Attn followed the blocking exactly. Nothing errored.
 
-This node now strips those keys before calling its own blocks (`_dense_options`
-in `nodes.py`), so the tower stays dense whatever the sampler is using. The
-tower is 5 blocks against the base model's 50, so running it dense costs little
-and keeps the control exact.
+First hypothesis, now **disproved**: that the control tower was being
+sparsified. Sparse packs install an `optimized_attention_override` into
+`transformer_options`, and comfy's `Attention` forwards `transformer_options`
+straight to `optimized_attention`, so the tower's own `DiTBlock`s do inherit it.
+`_dense_options` in `nodes.py` strips those keys so the tower runs dense
+whatever the sampler uses. That change is correct on its own terms and worth
+keeping, but it did **not** restore the control: the result was
+indistinguishable from the sparse-tower run.
 
-If you write another ControlNet for H3, this is the trap that will get you: your
-blocks are not the model's blocks, but they receive the model's
-`transformer_options`.
+Current suspect: **token reordering**. Sol-Attn's `morton` option permutes video
+tokens into Z-order so each attention block is a compact 3D neighbourhood. Our
+skip is added at raster-order rows `[a:b]` taken from `mod_segments`, so a
+permuted stream would land the control on the wrong tokens, which would look
+exactly like this. Untested at the time of writing.
+
+If you are writing another ControlNet for H3, the general lesson survives
+whatever the specific cause turns out to be: **your blocks are not the model's
+blocks, but they receive the model's `transformer_options`, and any backend that
+reorders or reroutes tokens invalidates the row offsets your skip depends on.**
 
 ---
 
