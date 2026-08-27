@@ -1,0 +1,15 @@
+[project]
+name = "comfyui-h3-funcontrol"
+description = "MiniMax-H3 Fun ControlNet for ComfyUI. Depth, canny, pose, HED or MLSD video driving H3 frame by frame, built on ComfyUI's own H3 blocks."
+version = "0.1.0"
+license = { file = "LICENSE" }
+requires-python = ">=3.10"
+dependencies = []
+
+[project.urls]
+Repository = ""
+
+[tool.comfy]
+DisplayName = "H3 Fun ControlNet"
+PublisherId = ""
+includes = []
