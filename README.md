@@ -263,35 +263,45 @@ Once the original block has run, `args["img"]` *is* the output and the tower's
 entry state is gone. The seed must be cloned before the base block runs, at the
 entry layer only.
 
-### Trap 8: sparse attention breaks the control, cause not yet pinned down
+### Trap 8: token reordering moves the rows your skip lands on
 
-**Status: open. Do not assume this node works under a sparse-attention
-backend.**
+Sparse-attention backends work with this node, but **not with token reordering
+switched on.**
 
 Measured with [Sol-Attn](https://github.com/kijai/ComfyUI-SolAttn_triton) on our
-test shot: **1.39x faster, and the control was gone entirely.** Not degraded,
-gone. The figure stood centred and near-motionless for the whole clip while the
-same seed without Sol-Attn followed the blocking exactly. Nothing errored.
+test shot, same seed and settings throughout:
 
-First hypothesis, now **disproved**: that the control tower was being
-sparsified. Sparse packs install an `optimized_attention_override` into
-`transformer_options`, and comfy's `Attention` forwards `transformer_options`
-straight to `optimized_attention`, so the tower's own `DiTBlock`s do inherit it.
-`_dense_options` in `nodes.py` strips those keys so the tower runs dense
-whatever the sampler uses. That change is correct on its own terms and worth
-keeping, but it did **not** restore the control: the result was
-indistinguishable from the sparse-tower run.
+| run | time | control |
+|---|---|---|
+| no Sol-Attn (baseline) | 332s | follows the blocking |
+| Sol-Attn, `morton: true` | 240s | **gone.** Figure static and centred for the whole clip |
+| Sol-Attn, `morton: false` | **220s (1.51x)** | follows the blocking |
 
-Current suspect: **token reordering**. Sol-Attn's `morton` option permutes video
-tokens into Z-order so each attention block is a compact 3D neighbourhood. Our
-skip is added at raster-order rows `[a:b]` taken from `mod_segments`, so a
-permuted stream would land the control on the wrong tokens, which would look
-exactly like this. Untested at the time of writing.
+Nothing errored in the broken case. The clip looked like a normal generation
+that had simply ignored its control input.
 
-If you are writing another ControlNet for H3, the general lesson survives
-whatever the specific cause turns out to be: **your blocks are not the model's
+`morton` permutes video tokens into Z-order so each attention block is a compact
+3D neighbourhood instead of a 2-row strip. Our skip is added at **raster-order**
+rows `[a:b]` read from `mod_segments`, so under a permuted stream the control
+lands on the wrong tokens. That is the whole failure.
+
+A skip applied by row offset assumes nobody has reordered the rows. Any backend
+that permutes tokens invalidates it.
+
+**Also worth keeping** (though it turned out not to be the cause here): sparse
+packs install an `optimized_attention_override` into `transformer_options`, and
+comfy's `Attention` forwards `transformer_options` straight to
+`optimized_attention`, so the control tower's own `DiTBlock`s inherit it and go
+sparse, routed with the base stream's bookkeeping. `_dense_options` in
+`nodes.py` strips those keys so the tower stays dense whatever the sampler uses.
+We disproved this as the cause of the Morton failure by testing it on its own,
+and it did not restore control. It is still the right thing to do, and the
+confirmed-good configuration has both it and `morton: false`. We have not
+isolated whether `_dense_options` is strictly necessary once Morton is off.
+
+If you are writing another ControlNet for H3: **your blocks are not the model's
 blocks, but they receive the model's `transformer_options`, and any backend that
-reorders or reroutes tokens invalidates the row offsets your skip depends on.**
+reorders tokens invalidates the row offsets your skip depends on.**
 
 ---
 
@@ -386,9 +396,10 @@ Untested or unknown:
 - The ControlNet was trained against the **fl2va** base, and we mostly run it on
   **ref2va**. Same architecture, loads and runs, adherence appears to hold, but
   it is not the trained pairing.
-- Sparse attention on the BASE model. The control tower is kept dense (Trap 8),
-  but we have not yet checked how much sparsifying the base costs in adherence,
-  only that the tower must be excluded. Sol-Attn measured 1.39x on our shot.
+- How much sparsifying the base model costs in adherence. Sol-Attn with
+  `morton: false` measured 1.51x on our shot with the control still following
+  the blocking, but we have not graded the picture against the dense baseline
+  beyond confirming the control survives.
 - Only depth and pose have been exercised. Canny, HED and MLSD are in the union
   model's training set but we have not run them.
 
