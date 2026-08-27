@@ -2015,7 +2015,7 @@
   ],
   "groups": [
     {
-      "id": 4333,
+      "id": 654,
       "title": "Models",
       "bounding": [
         680,
@@ -2028,7 +2028,7 @@
       "flags": {}
     },
     {
-      "id": 6437,
+      "id": 3042,
       "title": "CONTROL: chained, strengths SUM to about 1.0",
       "bounding": [
         680,
@@ -2041,7 +2041,7 @@
       "flags": {}
     },
     {
-      "id": 9761,
+      "id": 8344,
       "title": "Conditioning and references",
       "bounding": [
         1100,
@@ -2054,7 +2054,7 @@
       "flags": {}
     },
     {
-      "id": 1107,
+      "id": 6215,
       "title": "Sampling",
       "bounding": [
         2000,
@@ -2067,7 +2067,7 @@
       "flags": {}
     },
     {
-      "id": 8967,
+      "id": 3072,
       "title": "Output",
       "bounding": [
         2380,

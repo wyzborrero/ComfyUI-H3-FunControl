@@ -33,6 +33,25 @@ LINK_TYPES = {
 }
 
 
+# Sol-Attn settings used by workflow 03. Stated explicitly rather than relying
+# on the node's defaults, because one of them is load-bearing: morton MUST be
+# False or this ControlNet's contribution lands on the wrong tokens.
+SOLATTN_WIDGETS = {
+    "tau": 1.3,
+    "start_percent": 0.2,
+    "end_percent": 0.9,
+    "min_tokens": 4096,
+    "int8_qk": True,
+    "sink_conditioning": "exact_kv_and_rows",
+    "morton": False,
+    "morton_curve": "2d_frame",
+    "int8_pv": True,
+    "verbose": False,
+    "use_tma": False,
+    "dense_blocks": "0,-1",
+}
+
+
 def fetch(server):
     with urllib.request.urlopen(f"{server}/object_info", timeout=180) as r:
         return json.load(r)
@@ -441,6 +460,128 @@ since the model runs twice per step. Try both."""),
     return build(info, N, L, G, None)
 
 
+# ---------------------------------------------------------------------------
+# 03: the same recipe as 02, plus optional sparse attention.
+# ---------------------------------------------------------------------------
+def _default_for(info, node_type, name):
+    """A widget's declared default, from whichever section declares it."""
+    schema = info[node_type]["input"]
+    for section in ("required", "optional"):
+        spec = (schema.get(section) or {}).get(name)
+        if spec is None:
+            continue
+        opts = spec[1] if len(spec) > 1 and isinstance(spec[1], dict) else {}
+        if "default" in opts:
+            return opts["default"]
+        if isinstance(spec[0], list) and spec[0]:
+            return spec[0][0]
+        if "options" in opts and opts["options"]:
+            return opts["options"][0]
+        return ""
+    raise KeyError(f"{node_type} has no input {name}")
+
+
+def workflow_solattn(info):
+    """02 with a SolAttnPatch inserted after the control towers.
+
+    Kept as a separate file on purpose: Sol-Attn is a third-party node pack and
+    needs Triton, so most people will not have it. Workflows 01 and 02 use
+    nothing but ComfyUI core and this node.
+    """
+    graph = workflow_dual(info)
+
+    patch_id = 60
+    # Rewire: sigma shift currently reads from the second control apply (27).
+    # Put the patch between them.
+    for link in graph["links"]:
+        _lid, src, _sslot, dst, _dslot, _t = link
+        if src == 27 and dst == 24:
+            link[1] = patch_id                      # sigma shift now reads the patch
+    for n in graph["nodes"]:
+        if n["id"] == 27:
+            for o in n["outputs"]:
+                o["links"] = [graph["last_link_id"] + 1]
+        if n["id"] == 24:
+            pass
+
+    new_link = [graph["last_link_id"] + 1, 27, 0, patch_id, 0, "MODEL"]
+    graph["links"].append(new_link)
+    graph["last_link_id"] = new_link[0]
+
+    node = {
+        "id": patch_id, "type": "SolAttnPatch",
+        "pos": [1540, 900], "size": [420, 400],
+        "flags": {}, "order": 99, "mode": 0,
+        "title": "Sol-Attn  (OPTIONAL, needs the SolAttn node pack + Triton)",
+        "inputs": [{"localized_name": "model", "name": "model", "type": "MODEL",
+                    "link": new_link[0]}],
+        "outputs": [{"localized_name": "MODEL", "name": "MODEL", "type": "MODEL",
+                     "links": [next(l[0] for l in graph["links"]
+                                    if l[1] == patch_id and l[3] == 24)]}],
+        "properties": {"Node name for S&R": "SolAttnPatch"},
+        "widgets_values": [], "widgets_values_named": {},
+    }
+    # Fill the widgets from the live schema so nothing is missed.
+    values, named = [], {}
+    for name, typ, is_widget in spec_inputs(info, "SolAttnPatch"):
+        if not is_widget:
+            continue
+        node["inputs"].append({"localized_name": name, "name": name, "type": typ,
+                               "widget": {"name": name}, "link": None})
+        # Anything not named in SOLATTN_WIDGETS falls back to the node's own
+        # declared default, so a change in that pack does not break this.
+        v = SOLATTN_WIDGETS.get(name, _default_for(info, "SolAttnPatch", name))
+        values.append(v)
+        named[name] = v
+    node["widgets_values"] = values
+    node["widgets_values_named"] = named
+    graph["nodes"].append(node)
+    graph["last_node_id"] = max(graph["last_node_id"], patch_id)
+
+    graph["nodes"].append({
+        "id": 61, "type": "MarkdownNote", "pos": [40, 880], "size": [600, 420],
+        "flags": {}, "order": 100, "mode": 0, "inputs": [], "outputs": [],
+        "title": "Sol-Attn: read before enabling",
+        "properties": {}, "color": "#432", "bgcolor": "#653",
+        "widgets_values": ["""## Optional speed-up
+
+This graph is workflow 02 with one extra node. It needs
+[ComfyUI-SolAttn_triton](https://github.com/kijai/ComfyUI-SolAttn_triton) and a
+working Triton. If you do not have those, use workflow 02 instead: nothing else
+here depends on it.
+
+### morton MUST stay off
+
+`morton` reorders video tokens into Z-order. This ControlNet adds its
+contribution at **raster-order row offsets**, so a reordered stream puts the
+control on the wrong tokens.
+
+With `morton: true` **the control disappears completely and nothing errors**.
+You get a clean-looking video that has quietly ignored its control input. See
+Trap 8 in the README.
+
+### Measured, RTX 5090
+
+90 frames at 1280x704, 28 steps, depth 0.3 + pose 0.7, same seed throughout:
+
+| | time | control |
+|---|---|---|
+| no Sol-Attn | 332s | follows the control |
+| `morton: true` | 240s | **gone** |
+| `morton: false` | **220s (1.51x)** | follows the control |
+
+Your numbers will differ. Triton compiles its kernels on first use, so the
+first run is a compile and not a measurement: run it twice before believing a
+time.
+
+`dense_blocks` of `0,-1` keeps the first and last transformer blocks exact.
+They are the most approximation-sensitive, and block 0 is also where this
+ControlNet's stream enters."""],
+    })
+    graph["groups"].append(group("OPTIONAL: sparse attention", 1520, 870, 460, 450, "#3f8e5f"))
+    return graph
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--server", default="http://127.0.0.1:8188")
@@ -452,8 +593,15 @@ def main():
             raise SystemExit(f"{name} is not installed on {args.server}")
 
     OUT.mkdir(parents=True, exist_ok=True)
-    for filename, fn in (("01_single_control.json", workflow_single),
-                         ("02_depth_plus_pose_reference.json", workflow_dual)):
+    builders = [("01_single_control.json", workflow_single),
+                ("02_depth_plus_pose_reference.json", workflow_dual)]
+    # 03 needs the Sol-Attn pack present to read its widget list. Skip it
+    # rather than emit a graph with guessed inputs.
+    if "SolAttnPatch" in info:
+        builders.append(("03_optional_solattn_speedup.json", workflow_solattn))
+    else:
+        print("  (SolAttnPatch not installed, skipping workflow 03)")
+    for filename, fn in builders:
         graph = fn(info)
         (OUT / filename).write_text(json.dumps(graph, indent=2), encoding="utf-8")
         n_notes = sum(1 for n in graph["nodes"] if n["type"] == "MarkdownNote")
