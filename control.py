@@ -56,6 +56,8 @@ import torch
 from torch import nn
 
 import comfy.ops
+import comfy.utils
+import comfy.ldm.common_dit
 from comfy.ldm.minimax.model import DiTBlock
 
 # From MiniMaxH3Model.__init__ defaults. These are not guesses: hidden 5376,
@@ -129,16 +131,19 @@ class H3FunControlNet(nn.Module):
             for i in range(num_blocks)])
 
     @classmethod
-    def from_state_dict(cls, sd, dtype=torch.bfloat16, device="cpu"):
+    def from_state_dict(cls, sd, dtype=torch.bfloat16, device="cpu", operations=None):
         """Load a checkpoint, mapping its flat names onto this module tree.
 
         The checkpoint stores control_blocks.N.<tensor> with the DiTBlock's own
         tensors at the top level of the block. This module nests them under
         .block so the stock class can own them, so the only remapping is
         inserting that one path component.
+
+        Quantized checkpoints (per-layer comfy_quant + weight_scale, e.g. the
+        int8 convrot build) need MixedPrecisionOps so those keys have a loader;
+        plain checkpoints keep disable_weight_init.
         """
         count = 1 + max(int(k.split(".")[1]) for k in sd if k.startswith("control_blocks."))
-        model = cls(num_blocks=count, dtype=dtype, device=device)
 
         remapped = {}
         for key, value in sd.items():
@@ -150,6 +155,15 @@ class H3FunControlNet(nn.Module):
                     remapped[f"control_blocks.{index}.block.{rest}"] = value
             else:
                 remapped[key] = value
+
+        if operations is None:
+            quant_config = comfy.utils.detect_layer_quantization(remapped, "")
+            if quant_config is not None:
+                operations = comfy.ops.mixed_precision_ops(quant_config, dtype)
+            else:
+                operations = comfy.ops.disable_weight_init
+        model = cls(num_blocks=count, dtype=dtype, device=device,
+                    operations=operations)
 
         missing, unexpected = model.load_state_dict(remapped, strict=False)
         if missing or unexpected:
@@ -214,9 +228,10 @@ def patchify(latent, channels=LATENT_DIM):
     the tower is 2-D throughout. A batch greater than 1 has nowhere to go in
     this architecture, so say so rather than folding it into the token axis.
     """
+    if latent.shape[0] != 1:
+        raise ValueError(f"H3 control latents are single-batch; got batch {latent.shape[0]}")
+    latent = comfy.ldm.common_dit.pad_to_patch_size(latent, PATCH)
     b, c, t, h, w = latent.shape
-    if b != 1:
-        raise ValueError(f"H3 control latents are single-batch; got batch {b}")
     pt, ph, pw = PATCH
     latent = latent.view(b, c, t // pt, pt, h // ph, ph, w // pw, pw)
     latent = latent.permute(0, 2, 4, 6, 1, 3, 5, 7).contiguous()
