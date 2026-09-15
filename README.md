@@ -3,11 +3,12 @@
 A ComfyUI ControlNet for **MiniMax-H3**: depth, canny, pose, HED or MLSD video
 driving H3's generation, frame by frame.
 
-As far as we can tell this is the first working ComfyUI implementation. We
-checked ComfyUI core, KJNodes, Kijai's README, and
-[awesome-minimax-H3](https://github.com/wildminder/awesome-minimax-H3), and none
-of them wire up the Fun-ControlNet. Kijai's re-derived weights exist, but
-nothing consumes them.
+When this was published on 27 August 2026 it was, as far as we could tell,
+the first working ComfyUI implementation. **ComfyUI 0.35 (September 2026) now
+ships a native one**, `MiniMaxH3FunControlNetApply`, and its design converged
+independently with this node on every trap documented below. See
+[Core has one now](#core-has-one-now) for what that means and what this node
+still offers.
 
 This README documents **what went wrong and how we fixed it**, not just how to
 use it. Most of the bugs below failed *silently*. They produced a plausible
@@ -45,15 +46,58 @@ ComfyUI's own module naming. That is the piece that made a small implementation
 possible: with those weights, a control block *is* comfy's `DiTBlock`, and the
 AdaLN is comfy's `AdalnProj` unmodified.
 
-What was still missing was anything that consumed them. We checked ComfyUI core,
-KJNodes, Kijai's own README, and
+What was still missing, in August 2026, was anything that consumed them. We
+checked ComfyUI core, KJNodes, Kijai's own README, and
 [awesome-minimax-H3](https://github.com/wildminder/awesome-minimax-H3): no
-ControlNet node for H3 anywhere. As far as we can tell this is the first one.
+ControlNet node for H3 anywhere. This was the first. It no longer is, and that
+is a good outcome, not a bad one.
 
 So this is a small piece of glue over other people's work, filling a hole rather
 than inventing anything. The interesting part is not the code, which is short,
 but the list of ways it can be wrong while still producing a perfectly plausible
 video. That is what most of this README is.
+
+---
+
+## Core has one now
+
+ComfyUI 0.35 added `MiniMaxH3FunControlNetApply` in
+`comfy/ldm/minimax/controlnet.py`, loading the same curve-form checkpoint
+through `ModelPatchLoader`. Reading it against this node, the two arrived
+independently at the same shape: a full-length control stream seeded from the
+packed hidden state, the pristine stream cloned before the base block mutates
+it in place, chaining by wrapping whatever patch already owns a layer, summed
+skips, and zero-padded mask columns. Every one of Traps 3, 4, 5 and 7 below is
+a design decision in core. That is the strongest confirmation this work could
+have had.
+
+**What core has that this node does not:** video inpainting (`mask` and
+`source_video`), automatic fitting of the control video to the generation's
+length and size, and a clear error when the adaln form mismatches instead of a
+shape crash.
+
+**What this node still offers:** the findings in this README, measured rather
+than asserted; the strength-budget behaviour of chained controls; the
+schedule-window notes; and it keeps its control tower dense under sparse
+attention, which core's did not.
+
+**Two bugs core inherited, now upstream as
+[Comfy-Org/ComfyUI#16344](https://github.com/Comfy-Org/ComfyUI/pull/16344):**
+
+1. Core's `BlockSparseAttention` replaced any existing block patch instead of
+   composing with it, so *ControlNet then sparse* silently erased the control
+   on every layer, for core's own node and for this one. Measured on the same
+   seed: 15.2 dB and 17.0 dB against baseline with the figure visibly ignoring
+   the control; 31.8 dB and 26.8 dB with the fix, matching sparse-before.
+2. Core's control tower inherited the sampler's attention override and ran
+   sparse, routed with the base stream's bookkeeping.
+
+Until that PR lands, if you use core's `BlockSparseAttention` with any H3
+ControlNet, **apply the sparse node before the ControlNet**, never after. This
+node composes correctly in that order; both orders work with the PR.
+
+If you only need a ControlNet and nothing in this README applies to you, use
+core's. It is maintained by the people who maintain the model code.
 
 ---
 
@@ -371,9 +415,17 @@ and it did not restore control. It is still the right thing to do, and the
 confirmed-good configuration has both it and `morton: false`. We have not
 isolated whether `_dense_options` is strictly necessary once Morton is off.
 
+**Core's `BlockSparseAttention` (0.35) does not have this problem.** Its VSA
+backend also tiles tokens into cubes, but inside the attention call, with an
+inverse map on the way out, so the outer stream stays in raster order and a
+raster-row skip lands where it should. Measured: sparse before this node,
+26.8 dB against baseline with the control intact. What core's node did have
+was the ordering bug described in [Core has one now](#core-has-one-now).
+
 If you are writing another ControlNet for H3: **your blocks are not the model's
 blocks, but they receive the model's `transformer_options`, and any backend that
-reorders tokens invalidates the row offsets your skip depends on.**
+reorders tokens at the stream level invalidates the row offsets your skip
+depends on.**
 
 ---
 
